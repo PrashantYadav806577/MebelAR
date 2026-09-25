@@ -1,0 +1,86 @@
+# ==============================================================================
+# Unity generated & cache folders
+# ==============================================================================
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Asset server cache
+/[Aa]sset_Server_Cache/
+
+# ==============================================================================
+# Builds & Packages
+# ==============================================================================
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+*.x86
+*.x86_64
+
+# ==============================================================================
+# Burst / DOTS / Crash artifacts
+# ==============================================================================
+*_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+sysinfo.txt
+crashlytics-build.properties
+
+# ==============================================================================
+# IDE & Code Editor files
+# ==============================================================================
+.vs/
+.idea/
+.vscode/
+.vsconfig
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Unity meta files for generated code/assets
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# ==============================================================================
+# Sensitive & Secrets
+# ==============================================================================
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+*.credentials
+secrets.json
+
+# ==============================================================================
+# OS junk files
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
