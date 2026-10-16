@@ -33,6 +33,11 @@
 sysinfo.txt
 crashlytics-build.properties
 
+# Backup and temporary files
+*.bak
+*.backup*
+*.backup_*
+
 # ==============================================================================
 # IDE & Code Editor files
 # ==============================================================================

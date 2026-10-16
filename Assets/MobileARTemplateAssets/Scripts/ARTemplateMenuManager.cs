@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -197,10 +199,32 @@ public class ARTemplateMenuManager : MonoBehaviour
         set => m_DebugMenuSlider = value;
     }
 
+    [SerializeField]
+    [Tooltip("Optional TextMeshProUGUI label shown briefly when the user taps the floor without first selecting furniture. " +
+             "Leave empty to disable the hint.")]
+    TextMeshProUGUI m_NoSelectionHintLabel;
+
+    /// <summary>
+    /// Optional label shown when the user taps the floor without selecting furniture first.
+    /// Assign a TextMeshProUGUI component to display \"Please select furniture first\".
+    /// </summary>
+    public TextMeshProUGUI noSelectionHintLabel
+    {
+        get => m_NoSelectionHintLabel;
+        set => m_NoSelectionHintLabel = value;
+    }
+
+    /// <summary>
+    /// Whether the furniture catalog menu is currently open.
+    /// </summary>
+    public bool showObjectMenu => m_ShowObjectMenu;
+
     bool m_IsPointerOverUI;
     bool m_ShowObjectMenu;
     bool m_ShowOptionsModal;
     bool m_InitializingDebugMenu;
+    // Tracks whether the user selected a catalog item during the current menu session.
+    bool m_ItemSelectedThisSession;
     Vector2 m_ObjectButtonOffset = Vector2.zero;
     Vector2 m_ObjectMenuOffset = Vector2.zero;
     readonly List<ARFeatheredPlaneMeshVisualizerCompanion> featheredPlaneMeshVisualizerCompanions = new List<ARFeatheredPlaneMeshVisualizerCompanion>();
@@ -216,6 +240,9 @@ public class ARTemplateMenuManager : MonoBehaviour
         m_CancelButton.onClick.AddListener(HideMenu);
         m_DeleteButton.onClick.AddListener(DeleteFocusedObject);
         m_PlaneManager.planesChanged += OnPlaneChanged;
+        ObjectSpawner.onSpawnBlockedNoSelection += ShowNoSelectionHint;
+        if (m_ObjectSpawner != null)
+            m_ObjectSpawner.objectSpawned += OnFurnitureSpawned;
     }
 
     /// <summary>
@@ -230,6 +257,21 @@ public class ARTemplateMenuManager : MonoBehaviour
         m_CancelButton.onClick.RemoveListener(HideMenu);
         m_DeleteButton.onClick.RemoveListener(DeleteFocusedObject);
         m_PlaneManager.planesChanged -= OnPlaneChanged;
+        ObjectSpawner.onSpawnBlockedNoSelection -= ShowNoSelectionHint;
+        if (m_ObjectSpawner != null)
+            m_ObjectSpawner.objectSpawned -= OnFurnitureSpawned;
+    }
+
+    void OnFurnitureSpawned(GameObject spawnedObj)
+    {
+        if (spawnedObj != null)
+        {
+            var dims = spawnedObj.GetComponent<ARObjectDimensions>();
+            if (dims == null)
+                dims = spawnedObj.AddComponent<ARObjectDimensions>();
+
+            ARObjectDimensions.SelectObject(dims);
+        }
     }
 
     /// <summary>
@@ -245,6 +287,14 @@ public class ARTemplateMenuManager : MonoBehaviour
         InitializeDebugMenuOffsets();
         HideMenu();
         m_PlaneManager.planePrefab = m_DebugPlane;
+
+        // Ensure no furniture is selected at startup.
+        if (m_ObjectSpawner != null)
+            m_ObjectSpawner.spawnOptionIndex = -1;
+
+        // Hide the hint label at startup.
+        if (m_NoSelectionHintLabel != null)
+            m_NoSelectionHintLabel.gameObject.SetActive(false);
     }
 
     /// <summary>
@@ -264,24 +314,55 @@ public class ARTemplateMenuManager : MonoBehaviour
             {
                 m_DeleteButton.gameObject.SetActive(false);
             }
-            else
-            {
-                m_DeleteButton.gameObject.SetActive(m_InteractionGroup?.focusInteractable != null);
-            }
+            var focused = m_InteractionGroup?.focusInteractable;
+            m_DeleteButton.gameObject.SetActive(focused != null);
+            ARObjectDimensions.UpdateFocusedInteractable(focused);
 
-            m_IsPointerOverUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(-1);
+            m_IsPointerOverUI = CheckPointerOverUI();
         }
         else
         {
             m_IsPointerOverUI = false;
             m_CreateButton.gameObject.SetActive(true);
-            m_DeleteButton.gameObject.SetActive(m_InteractionGroup?.focusInteractable != null);
+            var focused = m_InteractionGroup?.focusInteractable;
+            m_DeleteButton.gameObject.SetActive(focused != null);
+            ARObjectDimensions.UpdateFocusedInteractable(focused);
         }
 
         if (!m_IsPointerOverUI && m_ShowOptionsModal)
         {
-            m_IsPointerOverUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(-1);
+            m_IsPointerOverUI = CheckPointerOverUI();
         }
+    }
+
+    bool CheckPointerOverUI()
+    {
+        if (EventSystem.current == null) return false;
+        if (EventSystem.current.IsPointerOverGameObject()) return true;
+        if (EventSystem.current.IsPointerOverGameObject(-1)) return true;
+
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
+                return true;
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        if (Touchscreen.current != null)
+        {
+            for (int i = 0; i < Touchscreen.current.touches.Count; i++)
+            {
+                var t = Touchscreen.current.touches[i];
+                if (t.isInProgress)
+                {
+                    int fingerId = t.touchId.ReadValue();
+                    if (EventSystem.current.IsPointerOverGameObject(fingerId))
+                        return true;
+                }
+            }
+        }
+#endif
+        return false;
     }
 
     /// <summary>
@@ -300,6 +381,7 @@ public class ARTemplateMenuManager : MonoBehaviour
             if (m_ObjectSpawner.objectPrefabs.Count > objectIndex)
             {
                 m_ObjectSpawner.spawnOptionIndex = objectIndex;
+                m_ItemSelectedThisSession = true;   // user explicitly picked an item
             }
             else
             {
@@ -308,6 +390,26 @@ public class ARTemplateMenuManager : MonoBehaviour
         }
 
         HideMenu();
+    }
+
+    /// <summary>
+    /// Shows a brief "Please select furniture first" hint. Called externally when the user taps
+    /// the floor without having chosen an item from the catalog.
+    /// </summary>
+    public void ShowNoSelectionHint()
+    {
+        if (m_NoSelectionHintLabel == null) return;
+        StopCoroutine(nameof(HideHintAfterDelay));
+        m_NoSelectionHintLabel.text = "Please select furniture first";
+        m_NoSelectionHintLabel.gameObject.SetActive(true);
+        StartCoroutine(nameof(HideHintAfterDelay));
+    }
+
+    IEnumerator HideHintAfterDelay()
+    {
+        yield return new WaitForSeconds(2f);
+        if (m_NoSelectionHintLabel != null)
+            m_NoSelectionHintLabel.gameObject.SetActive(false);
     }
 
     void ShowMenu()
@@ -391,6 +493,16 @@ public class ARTemplateMenuManager : MonoBehaviour
     {
         m_ObjectMenuAnimator.SetBool("Show", false);
         m_ShowObjectMenu = false;
+
+        // If the user closed the menu WITHOUT selecting an item, reset the spawn index to -1
+        // so that floor taps continue to be blocked by ObjectSpawner.requireExplicitSelection.
+        if (!m_ItemSelectedThisSession)
+        {
+            if (m_ObjectSpawner != null)
+                m_ObjectSpawner.spawnOptionIndex = -1;
+        }
+
+        m_ItemSelectedThisSession = false;  // reset for next menu session
         AdjustARDebugMenuPosition();
     }
 
@@ -405,13 +517,27 @@ public class ARTemplateMenuManager : MonoBehaviour
 
     void HideTapOutsideUI(InputAction.CallbackContext context)
     {
-        if (!m_IsPointerOverUI)
+        // Don't dismiss menus if pointer is over any UI element
+        if (CheckPointerOverUI())
+            return;
+
+        if (context.valueType == typeof(Vector2))
         {
-            if (m_ShowObjectMenu)
-                HideMenu();
-            if (m_ShowOptionsModal)
-                m_ModalMenu.SetActive(false);
+            Vector2 tapPos = context.ReadValue<Vector2>();
+            if (EventSystem.current != null)
+            {
+                PointerEventData eventData = new PointerEventData(EventSystem.current) { position = tapPos };
+                List<RaycastResult> results = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(eventData, results);
+                if (results.Count > 0)
+                    return; // Tap was on a UI element (e.g. Measure Button, catalog)
+            }
         }
+
+        if (m_ShowObjectMenu)
+            HideMenu();
+        if (m_ShowOptionsModal)
+            m_ModalMenu.SetActive(false);
     }
 
     void DeleteFocusedObject()

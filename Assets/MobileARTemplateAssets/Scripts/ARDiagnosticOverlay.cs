@@ -36,7 +36,8 @@ namespace MebelAR.Diagnostics
         [SerializeField] private bool m_EnableCornerPip = false;
 
         [Header("Display Settings")]
-        [SerializeField] private bool m_ShowOnScreen = true;
+        [Tooltip("When false, no diagnostic overlay is rendered on screen.")]
+        [SerializeField] private bool m_ShowOnScreen = false;
         [SerializeField] private int m_FontSize = 24;
 
         // Runtime diagnostic statistics

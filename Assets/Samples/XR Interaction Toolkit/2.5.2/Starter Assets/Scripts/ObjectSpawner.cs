@@ -61,6 +61,35 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             "a random object each time it spawns.")]
         int m_SpawnOptionIndex = -1;
 
+        [SerializeField]
+        [Tooltip("When true, TrySpawnObject will do nothing unless the user has explicitly selected a furniture " +
+            "item (i.e. spawnOptionIndex is a valid index). Set to false to restore the original random-spawn behaviour.")]
+        bool m_RequireExplicitSelection = true;
+
+        [SerializeField]
+        [Tooltip("When false, spawning is completely disabled (e.g. while in Measure Mode).")]
+        bool m_SpawningEnabled = true;
+
+        /// <summary>
+        /// When false, spawning is completely disabled.
+        /// Useful when switching to measurement mode so floor taps do not place objects.
+        /// </summary>
+        public bool spawningEnabled
+        {
+            get => m_SpawningEnabled;
+            set => m_SpawningEnabled = value;
+        }
+
+        /// <summary>
+        /// When true, spawning is blocked if no furniture item has been explicitly selected.
+        /// Prevents random furniture appearing when the user taps the floor without choosing an item.
+        /// </summary>
+        public bool requireExplicitSelection
+        {
+            get => m_RequireExplicitSelection;
+            set => m_RequireExplicitSelection = value;
+        }
+
         /// <summary>
         /// The index of the prefab to spawn. If outside the range of <see cref="objectPrefabs"/>, this behavior will
         /// select a random object each time it spawns.
@@ -155,6 +184,15 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
         public event Action<GameObject> objectSpawned;
 
         /// <summary>
+        /// Static event fired when a spawn attempt is blocked because no furniture item has been
+        /// explicitly selected (i.e. <see cref="requireExplicitSelection"/> is true and
+        /// <see cref="isSpawnOptionRandomized"/> is true).
+        /// Subscribe from <c>Assembly-CSharp</c> scripts (e.g. ARTemplateMenuManager) to show
+        /// a "please select furniture first" hint without creating a circular assembly dependency.
+        /// </summary>
+        public static event Action onSpawnBlockedNoSelection;
+
+        /// <summary>
         /// See <see cref="MonoBehaviour"/>.
         /// </summary>
         void Awake()
@@ -205,6 +243,26 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
         /// <seealso cref="objectSpawned"/>
         public bool TrySpawnObject(Vector3 spawnPoint, Vector3 spawnNormal)
         {
+            // Block spawning completely if spawning is disabled.
+            if (!m_SpawningEnabled)
+                return false;
+
+            // Prevent spawning when touching any UI element (Measure button, Object Selection button, catalog, panels)
+            if (UnityEngine.EventSystems.EventSystem.current != null)
+            {
+                if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                    return false;
+                if (Input.touchCount > 0 && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId))
+                    return false;
+            }
+
+            // Block spawning if no item has been explicitly selected from the catalog.
+            if (m_RequireExplicitSelection && isSpawnOptionRandomized)
+            {
+                onSpawnBlockedNoSelection?.Invoke();
+                return false;
+            }
+
             if (m_OnlySpawnInView)
             {
                 var inViewMin = m_ViewportPeriphery;
