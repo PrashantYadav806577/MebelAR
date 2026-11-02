@@ -184,6 +184,17 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
         public event Action<GameObject> objectSpawned;
 
         /// <summary>
+        /// Static delegate to validate placement position before spawning (e.g. overlap checks).
+        /// Returns true if spawn position is valid, false to block spawn.
+        /// </summary>
+        public static Func<GameObject, Vector3, bool> placementValidator;
+
+        /// <summary>
+        /// Static event fired when a spawn attempt is blocked because it overlaps with an existing furniture object.
+        /// </summary>
+        public static event Action onSpawnBlockedOverlap;
+
+        /// <summary>
         /// Static event fired when a spawn attempt is blocked because no furniture item has been
         /// explicitly selected (i.e. <see cref="requireExplicitSelection"/> is true and
         /// <see cref="isSpawnOptionRandomized"/> is true).
@@ -278,12 +289,19 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             var objectIndex = isSpawnOptionRandomized ? Random.Range(0, m_ObjectPrefabs.Count) : m_SpawnOptionIndex;
             var objectToSpawn = m_ObjectPrefabs[objectIndex];
 
+            // Validate placement against existing furniture objects (e.g. overlap checks)
+            if (placementValidator != null && !placementValidator(objectToSpawn, spawnPoint))
+            {
+                onSpawnBlockedOverlap?.Invoke();
+                return false;
+            }
+
             var isWall = spawnNormal.normalized.y != 1;
 
             GameObject newObject;
             var furnitureProperties = objectToSpawn.GetComponentInChildren<FurnitureItem>();
 
-            var canSpawnObject = (isWall && furnitureProperties.canSpawnOnWall) || (!isWall && furnitureProperties.canSpawnOnFloor);
+            var canSpawnObject = furnitureProperties == null || (isWall && furnitureProperties.canSpawnOnWall) || (!isWall && furnitureProperties.canSpawnOnFloor);
 
             if (canSpawnObject)
             {
@@ -304,7 +322,6 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             else
             {
                 // if object is spawned on the floor, rotate it to face the camera
-
                 var facePosition = m_CameraToFace.transform.position;
                 var forward = facePosition - spawnPoint;
                 BurstMathUtility.ProjectOnPlane(forward, spawnNormal, out var projectedForward);
@@ -325,6 +342,7 @@ namespace UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets
             }
 
             objectSpawned?.Invoke(newObject);
+            m_SpawnOptionIndex = -1; // Reset selection so user must explicitly pick item again
             return true;
         }
     }

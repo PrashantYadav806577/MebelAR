@@ -180,6 +180,19 @@ public class GoalManager : MonoBehaviour
     int m_SurfacesTapped;
     int m_CurrentGoalIndex = 0;
 
+    void Awake()
+    {
+        EnsureWelcomeLayout();
+    }
+
+    void EnsureWelcomeLayout()
+    {
+        if (m_GreetingPrompt != null && m_GreetingPrompt.GetComponent<MobileARTemplateAssets.Scripts.WelcomeScreenLayout>() == null)
+        {
+            m_GreetingPrompt.AddComponent<MobileARTemplateAssets.Scripts.WelcomeScreenLayout>();
+        }
+    }
+
     void Update()
     {
         if (Pointer.current != null && Pointer.current.press.wasPressedThisFrame && !m_AllGoalsFinished && (m_CurrentGoal.CurrentGoal == OnboardingGoals.FindSurfaces || m_CurrentGoal.CurrentGoal == OnboardingGoals.Hints || m_CurrentGoal.CurrentGoal == OnboardingGoals.Scale))

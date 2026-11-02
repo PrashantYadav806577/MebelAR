@@ -13,7 +13,7 @@ using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
 /// <summary>
 /// Handles dismissing the object menu when clicking out the UI bounds, and showing the
 /// menu again when the create menu button is clicked after dismissal. Manages object deletion in the AR demo scene,
-/// and also handles the toggling between the object creation menu button and the delete button.
+/// lock/unlock state of selected furniture, selected item name and dimension display, and placement hints.
 /// </summary>
 public class ARTemplateMenuManager : MonoBehaviour
 {
@@ -200,19 +200,38 @@ public class ARTemplateMenuManager : MonoBehaviour
     }
 
     [SerializeField]
-    [Tooltip("Optional TextMeshProUGUI label shown briefly when the user taps the floor without first selecting furniture. " +
-             "Leave empty to disable the hint.")]
+    [Tooltip("Optional TextMeshProUGUI label shown briefly when hints or warnings are displayed.")]
     TextMeshProUGUI m_NoSelectionHintLabel;
 
     /// <summary>
     /// Optional label shown when the user taps the floor without selecting furniture first.
-    /// Assign a TextMeshProUGUI component to display \"Please select furniture first\".
     /// </summary>
     public TextMeshProUGUI noSelectionHintLabel
     {
         get => m_NoSelectionHintLabel;
         set => m_NoSelectionHintLabel = value;
     }
+
+    [Header("Feature UI References")]
+    [SerializeField]
+    GameObject m_SelectedNameBadgeGO;
+
+    [SerializeField]
+    TextMeshProUGUI m_SelectedFurnitureLabel;
+
+    [SerializeField]
+    Button m_LockButton;
+
+    [SerializeField]
+    TextMeshProUGUI m_LockButtonLabel;
+
+    [SerializeField]
+    Image m_LockButtonImage;
+
+    [SerializeField]
+    GameObject m_LockButtonCheckIndicator;
+
+    string m_SelectedFurnitureName;
 
     /// <summary>
     /// Whether the furniture catalog menu is currently open.
@@ -229,18 +248,30 @@ public class ARTemplateMenuManager : MonoBehaviour
     Vector2 m_ObjectMenuOffset = Vector2.zero;
     readonly List<ARFeatheredPlaneMeshVisualizerCompanion> featheredPlaneMeshVisualizerCompanions = new List<ARFeatheredPlaneMeshVisualizerCompanion>();
 
+    void Awake()
+    {
+        EnsureFeaturesUI();
+    }
+
     /// <summary>
     /// See <see cref="MonoBehaviour"/>.
     /// </summary>
     void OnEnable()
     {
+        EnsureFeaturesUI();
         m_ScreenSpaceController.dragCurrentPositionAction.action.started += HideTapOutsideUI;
         m_ScreenSpaceController.tapStartPositionAction.action.started += HideTapOutsideUI;
         m_CreateButton.onClick.AddListener(ShowMenu);
         m_CancelButton.onClick.AddListener(HideMenu);
         m_DeleteButton.onClick.AddListener(DeleteFocusedObject);
         m_PlaneManager.planesChanged += OnPlaneChanged;
+
         ObjectSpawner.onSpawnBlockedNoSelection += ShowNoSelectionHint;
+        ObjectSpawner.onSpawnBlockedOverlap += ShowOverlapHint;
+        ObjectSpawner.placementValidator = ARObjectDimensions.ValidateSpawnCandidate;
+        ARObjectDimensions.onLockStateChanged += OnLockStateChanged;
+        ARObjectDimensions.onSelectionChanged += OnSelectionChanged;
+
         if (m_ObjectSpawner != null)
             m_ObjectSpawner.objectSpawned += OnFurnitureSpawned;
     }
@@ -257,7 +288,13 @@ public class ARTemplateMenuManager : MonoBehaviour
         m_CancelButton.onClick.RemoveListener(HideMenu);
         m_DeleteButton.onClick.RemoveListener(DeleteFocusedObject);
         m_PlaneManager.planesChanged -= OnPlaneChanged;
+
         ObjectSpawner.onSpawnBlockedNoSelection -= ShowNoSelectionHint;
+        ObjectSpawner.onSpawnBlockedOverlap -= ShowOverlapHint;
+        ObjectSpawner.placementValidator = null;
+        ARObjectDimensions.onLockStateChanged -= OnLockStateChanged;
+        ARObjectDimensions.onSelectionChanged -= OnSelectionChanged;
+
         if (m_ObjectSpawner != null)
             m_ObjectSpawner.objectSpawned -= OnFurnitureSpawned;
     }
@@ -271,7 +308,25 @@ public class ARTemplateMenuManager : MonoBehaviour
                 dims = spawnedObj.AddComponent<ARObjectDimensions>();
 
             ARObjectDimensions.SelectObject(dims);
+            m_SelectedFurnitureName = dims.DisplayName;
+            UpdateSelectedNameBadge();
+            UpdateLockButtonVisual();
         }
+    }
+
+    void OnSelectionChanged(ARObjectDimensions obj)
+    {
+        if (obj != null)
+        {
+            m_SelectedFurnitureName = obj.DisplayName;
+        }
+        UpdateSelectedNameBadge();
+        UpdateLockButtonVisual();
+    }
+
+    void OnLockStateChanged(ARObjectDimensions obj, bool locked)
+    {
+        UpdateLockButtonVisual();
     }
 
     /// <summary>
@@ -279,22 +334,265 @@ public class ARTemplateMenuManager : MonoBehaviour
     /// </summary>
     void Start()
     {
-        // Auto turn on/off debug menu. We want it initially active so it calls into 'Start', which will
-        // allow us to move the menu properties later if the debug menu is turned on.
-        m_DebugMenu.gameObject.SetActive(false);
+        if (m_DebugMenu != null)
+            m_DebugMenu.gameObject.SetActive(false);
         m_InitializingDebugMenu = false;
 
         InitializeDebugMenuOffsets();
         HideMenu();
-        m_PlaneManager.planePrefab = m_DebugPlane;
+        if (m_PlaneManager != null)
+            m_PlaneManager.planePrefab = m_DebugPlane;
 
         // Ensure no furniture is selected at startup.
         if (m_ObjectSpawner != null)
             m_ObjectSpawner.spawnOptionIndex = -1;
 
+        // Ensure dynamic feature UI (Selected Name Badge, Lock Button, Hint Label) exists
+        EnsureFeaturesUI();
+
         // Hide the hint label at startup.
         if (m_NoSelectionHintLabel != null)
             m_NoSelectionHintLabel.gameObject.SetActive(false);
+
+        UpdateSelectedNameBadge();
+    }
+
+    void EnsureFeaturesUI()
+    {
+        Canvas canvas = GetComponent<Canvas>() ?? GetComponentInParent<Canvas>() ?? FindObjectOfType<Canvas>();
+        if (canvas == null) return;
+
+        // Try to obtain a valid font from existing text components on Canvas
+        TMP_FontAsset defaultFont = null;
+        var existingTMP = canvas.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (existingTMP != null)
+            defaultFont = existingTMP.font;
+
+        // 1. Resolve Hint Label if null
+        if (m_NoSelectionHintLabel == null)
+        {
+            var hintTrans = canvas.transform.Find("No Selection Hint");
+            if (hintTrans != null)
+                m_NoSelectionHintLabel = hintTrans.GetComponent<TextMeshProUGUI>();
+        }
+
+        // 2. Build Selected Furniture Item Name Badge (Top-left, clean compact rectangle)
+        if (m_SelectedNameBadgeGO == null)
+        {
+            Transform existingBadge = canvas.transform.Find("SelectedFurnitureBadge");
+            if (existingBadge != null)
+            {
+                m_SelectedNameBadgeGO = existingBadge.gameObject;
+                m_SelectedNameBadgeGO.transform.SetAsLastSibling();
+                m_SelectedFurnitureLabel = existingBadge.GetComponentInChildren<TextMeshProUGUI>();
+                if (m_SelectedFurnitureLabel != null && defaultFont != null && m_SelectedFurnitureLabel.font == null)
+                    m_SelectedFurnitureLabel.font = defaultFont;
+
+                var bg = existingBadge.GetComponent<Image>();
+                if (bg != null)
+                {
+                    bg.sprite = null; // Clean rectangular card (no pill/oval)
+                    bg.color = new Color(0.09f, 0.14f, 0.23f, 0.94f); // Deep navy #17243A
+                }
+
+                var outline = existingBadge.GetComponent<Outline>() ?? existingBadge.gameObject.AddComponent<Outline>();
+                outline.effectColor = new Color(0.25f, 0.35f, 0.50f, 0.60f);
+                outline.effectDistance = new Vector2(1f, -1f);
+
+                if (existingBadge.TryGetComponent<RectTransform>(out var r))
+                {
+                    r.anchorMin = new Vector2(0f, 1f);
+                    r.anchorMax = new Vector2(0f, 1f);
+                    r.pivot = new Vector2(0f, 1f);
+                    r.anchoredPosition = new Vector2(24f, -36f);
+                }
+            }
+            else
+            {
+                m_SelectedNameBadgeGO = new GameObject("SelectedFurnitureBadge");
+                m_SelectedNameBadgeGO.transform.SetParent(canvas.transform, false);
+                m_SelectedNameBadgeGO.transform.SetAsLastSibling();
+
+                RectTransform badgeRect = m_SelectedNameBadgeGO.AddComponent<RectTransform>();
+                badgeRect.anchorMin = new Vector2(0f, 1f);
+                badgeRect.anchorMax = new Vector2(0f, 1f);
+                badgeRect.pivot = new Vector2(0f, 1f);
+                badgeRect.anchoredPosition = new Vector2(24f, -36f);
+                badgeRect.sizeDelta = new Vector2(180f, 42f);
+
+                Image bg = m_SelectedNameBadgeGO.AddComponent<Image>();
+                bg.sprite = null; // Clean square-corner rectangle
+                bg.color = new Color(0.09f, 0.14f, 0.23f, 0.94f); // Deep navy #17243A
+                bg.raycastTarget = false;
+
+                var outline = m_SelectedNameBadgeGO.AddComponent<Outline>();
+                outline.effectColor = new Color(0.25f, 0.35f, 0.50f, 0.60f);
+                outline.effectDistance = new Vector2(1f, -1f);
+
+                GameObject textGO = new GameObject("Label");
+                textGO.transform.SetParent(m_SelectedNameBadgeGO.transform, false);
+
+                RectTransform textRect = textGO.AddComponent<RectTransform>();
+                textRect.anchorMin = Vector2.zero;
+                textRect.anchorMax = Vector2.one;
+                textRect.offsetMin = new Vector2(14f, 0f);
+                textRect.offsetMax = new Vector2(-14f, 0f);
+
+                m_SelectedFurnitureLabel = textGO.AddComponent<TextMeshProUGUI>();
+                if (defaultFont != null)
+                    m_SelectedFurnitureLabel.font = defaultFont;
+                m_SelectedFurnitureLabel.fontSize = 18f;
+                m_SelectedFurnitureLabel.fontStyle = FontStyles.Bold;
+                m_SelectedFurnitureLabel.color = Color.white;
+                m_SelectedFurnitureLabel.alignment = TextAlignmentOptions.MidlineLeft;
+                m_SelectedFurnitureLabel.enableWordWrapping = false;
+                m_SelectedFurnitureLabel.overflowMode = TextOverflowModes.Ellipsis;
+                m_SelectedFurnitureLabel.raycastTarget = false;
+                m_SelectedFurnitureLabel.text = "";
+
+                m_SelectedNameBadgeGO.SetActive(false);
+            }
+        }
+
+        // 3. Build Lock / Unlock Button (Bottom-left corner, clean rectangle with check indicator)
+        if (m_LockButton == null)
+        {
+            Transform existingLock = canvas.transform.Find("Lock Button");
+            if (existingLock != null)
+            {
+                m_LockButton = existingLock.GetComponent<Button>();
+                m_LockButtonImage = existingLock.GetComponent<Image>();
+                m_LockButtonLabel = existingLock.GetComponentInChildren<TextMeshProUGUI>();
+                if (m_LockButtonLabel != null && defaultFont != null && m_LockButtonLabel.font == null)
+                    m_LockButtonLabel.font = defaultFont;
+
+                if (m_LockButtonImage != null)
+                    m_LockButtonImage.sprite = null; // Clean square-corner rectangle
+
+                var outline = existingLock.GetComponent<Outline>() ?? existingLock.gameObject.AddComponent<Outline>();
+                outline.effectColor = new Color(0.25f, 0.35f, 0.50f, 0.60f);
+                outline.effectDistance = new Vector2(1f, -1f);
+
+                if (existingLock.TryGetComponent<RectTransform>(out var r))
+                {
+                    r.anchorMin = new Vector2(0f, 0f);
+                    r.anchorMax = new Vector2(0f, 0f);
+                    r.pivot = new Vector2(0f, 0f);
+                    r.anchoredPosition = new Vector2(24f, 130f);
+                    r.sizeDelta = new Vector2(145f, 44f);
+                }
+
+                var checkTrans = existingLock.Find("CheckboxBox/CheckIndicator");
+                if (checkTrans != null)
+                {
+                    m_LockButtonCheckIndicator = checkTrans.gameObject;
+                }
+                else
+                {
+                    EnsureCheckboxElements(existingLock.gameObject);
+                }
+
+                m_LockButton.onClick.RemoveListener(OnLockButtonClicked);
+                m_LockButton.onClick.AddListener(OnLockButtonClicked);
+                existingLock.SetAsLastSibling();
+            }
+            else
+            {
+                GameObject lockGO = new GameObject("Lock Button");
+                lockGO.transform.SetParent(canvas.transform, false);
+                lockGO.transform.SetAsLastSibling();
+
+                RectTransform lockRect = lockGO.AddComponent<RectTransform>();
+                lockRect.anchorMin = new Vector2(0f, 0f);
+                lockRect.anchorMax = new Vector2(0f, 0f);
+                lockRect.pivot = new Vector2(0f, 0f);
+                lockRect.localScale = Vector3.one;
+                lockRect.sizeDelta = new Vector2(145f, 44f);
+                lockRect.anchoredPosition = new Vector2(24f, 130f); // Respects safe area, above bottom navigation bar
+
+                m_LockButtonImage = lockGO.AddComponent<Image>();
+                m_LockButtonImage.sprite = null; // Clean square-corner rectangle
+                m_LockButtonImage.color = new Color(0.09f, 0.14f, 0.23f, 0.95f); // Deep navy #17243A
+
+                var outline = lockGO.AddComponent<Outline>();
+                outline.effectColor = new Color(0.25f, 0.35f, 0.50f, 0.60f);
+                outline.effectDistance = new Vector2(1f, -1f);
+
+                m_LockButton = lockGO.AddComponent<Button>();
+                m_LockButton.onClick.AddListener(OnLockButtonClicked);
+
+                EnsureCheckboxElements(lockGO);
+
+                GameObject labelGO = new GameObject("Label");
+                labelGO.transform.SetParent(lockGO.transform, false);
+
+                RectTransform labelRect = labelGO.AddComponent<RectTransform>();
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = new Vector2(40f, 0f);
+                labelRect.offsetMax = new Vector2(-8f, 0f);
+
+                m_LockButtonLabel = labelGO.AddComponent<TextMeshProUGUI>();
+                if (defaultFont != null)
+                    m_LockButtonLabel.font = defaultFont;
+                m_LockButtonLabel.text = "Lock";
+                m_LockButtonLabel.fontSize = 17f;
+                m_LockButtonLabel.fontStyle = FontStyles.Bold;
+                m_LockButtonLabel.alignment = TextAlignmentOptions.MidlineLeft;
+                m_LockButtonLabel.color = Color.white;
+                m_LockButtonLabel.raycastTarget = false;
+
+                lockGO.SetActive(false);
+            }
+        }
+    }
+
+    void EnsureCheckboxElements(GameObject lockGO)
+    {
+        Transform boxTrans = lockGO.transform.Find("CheckboxBox");
+        if (boxTrans == null)
+        {
+            GameObject boxGO = new GameObject("CheckboxBox");
+            boxGO.transform.SetParent(lockGO.transform, false);
+            RectTransform boxRect = boxGO.AddComponent<RectTransform>();
+            boxRect.anchorMin = new Vector2(0f, 0.5f);
+            boxRect.anchorMax = new Vector2(0f, 0.5f);
+            boxRect.pivot = new Vector2(0f, 0.5f);
+            boxRect.anchoredPosition = new Vector2(12f, 0f);
+            boxRect.sizeDelta = new Vector2(20f, 20f);
+
+            Image boxImg = boxGO.AddComponent<Image>();
+            boxImg.sprite = null;
+            boxImg.color = new Color(0.18f, 0.26f, 0.38f, 0.95f);
+            boxImg.raycastTarget = false;
+
+            var boxOutline = boxGO.AddComponent<Outline>();
+            boxOutline.effectColor = Color.white;
+            boxOutline.effectDistance = new Vector2(1f, -1f);
+
+            GameObject checkGO = new GameObject("CheckIndicator");
+            checkGO.transform.SetParent(boxGO.transform, false);
+            RectTransform checkRect = checkGO.AddComponent<RectTransform>();
+            checkRect.anchorMin = new Vector2(0.5f, 0.5f);
+            checkRect.anchorMax = new Vector2(0.5f, 0.5f);
+            checkRect.pivot = new Vector2(0.5f, 0.5f);
+            checkRect.anchoredPosition = Vector2.zero;
+            checkRect.sizeDelta = new Vector2(12f, 12f);
+
+            Image checkImg = checkGO.AddComponent<Image>();
+            checkImg.sprite = null;
+            checkImg.color = Color.white;
+            checkImg.raycastTarget = false;
+
+            m_LockButtonCheckIndicator = checkGO;
+            checkGO.SetActive(false);
+        }
+        else
+        {
+            Transform checkTrans = boxTrans.Find("CheckIndicator");
+            if (checkTrans != null)
+                m_LockButtonCheckIndicator = checkTrans.gameObject;
+        }
     }
 
     /// <summary>
@@ -304,34 +602,138 @@ public class ARTemplateMenuManager : MonoBehaviour
     {
         if (m_InitializingDebugMenu)
         {
-            m_DebugMenu.gameObject.SetActive(false);
+            if (m_DebugMenu != null)
+                m_DebugMenu.gameObject.SetActive(false);
             m_InitializingDebugMenu = false;
+        }
+
+        var focused = m_InteractionGroup?.focusInteractable;
+        ARObjectDimensions.UpdateFocusedInteractable(focused);
+
+        bool hasSelectedObject = (ARObjectDimensions.currentSelected != null);
+
+        // Delete button
+        if (m_DeleteButton != null)
+            m_DeleteButton.gameObject.SetActive((focused != null || hasSelectedObject) && !m_ShowObjectMenu);
+
+        // Lock / Unlock button (bottom-left corner)
+        if (m_LockButton != null)
+        {
+            bool showLock = hasSelectedObject && !m_ShowObjectMenu;
+            if (m_LockButton.gameObject.activeSelf != showLock)
+                m_LockButton.gameObject.SetActive(showLock);
+
+            if (showLock)
+            {
+                UpdateLockButtonVisual();
+            }
         }
 
         if (m_ShowObjectMenu || m_ShowOptionsModal)
         {
-            if (m_ShowObjectMenu)
-            {
-                m_DeleteButton.gameObject.SetActive(false);
-            }
-            var focused = m_InteractionGroup?.focusInteractable;
-            m_DeleteButton.gameObject.SetActive(focused != null);
-            ARObjectDimensions.UpdateFocusedInteractable(focused);
-
             m_IsPointerOverUI = CheckPointerOverUI();
         }
         else
         {
             m_IsPointerOverUI = false;
-            m_CreateButton.gameObject.SetActive(true);
-            var focused = m_InteractionGroup?.focusInteractable;
-            m_DeleteButton.gameObject.SetActive(focused != null);
-            ARObjectDimensions.UpdateFocusedInteractable(focused);
+            if (m_CreateButton != null)
+                m_CreateButton.gameObject.SetActive(true);
         }
 
         if (!m_IsPointerOverUI && m_ShowOptionsModal)
         {
             m_IsPointerOverUI = CheckPointerOverUI();
+        }
+
+        UpdateSelectedNameBadge();
+    }
+
+    void OnLockButtonClicked()
+    {
+        if (ARObjectDimensions.currentSelected != null)
+        {
+            ARObjectDimensions.currentSelected.ToggleLock();
+            UpdateLockButtonVisual();
+            UpdateSelectedNameBadge();
+        }
+    }
+
+    void UpdateLockButtonVisual()
+    {
+        if (m_LockButton == null) return;
+
+        bool isLocked = ARObjectDimensions.currentSelected != null && ARObjectDimensions.currentSelected.isLocked;
+
+        // Visual check/uncheck indicator (checked/filled when locked, empty when unlocked)
+        if (m_LockButtonCheckIndicator != null)
+        {
+            m_LockButtonCheckIndicator.SetActive(isLocked);
+        }
+
+        if (m_LockButtonLabel != null)
+        {
+            m_LockButtonLabel.text = isLocked ? "Unlock" : "Lock";
+        }
+
+        if (m_LockButtonImage != null)
+        {
+            // Crisp Coral #FF8066 when locked, Deep Navy #17243A when unlocked
+            m_LockButtonImage.color = isLocked
+                ? new Color(0.95f, 0.42f, 0.32f, 0.98f)  // Coral #FF8066
+                : new Color(0.09f, 0.14f, 0.23f, 0.95f);  // Deep Navy #17243A
+        }
+
+        if (m_LockButton.TryGetComponent<Outline>(out var outline))
+        {
+            outline.effectColor = isLocked
+                ? new Color(1.0f, 0.75f, 0.70f, 0.85f)
+                : new Color(0.25f, 0.35f, 0.50f, 0.60f);
+        }
+    }
+
+    void UpdateSelectedNameBadge()
+    {
+        if (m_SelectedNameBadgeGO == null || m_SelectedFurnitureLabel == null) return;
+
+        // Don't overlap the catalog menu when open
+        if (m_ShowObjectMenu)
+        {
+            m_SelectedNameBadgeGO.SetActive(false);
+            return;
+        }
+
+        if (ARObjectDimensions.currentSelected != null)
+        {
+            m_SelectedFurnitureName = ARObjectDimensions.currentSelected.DisplayName;
+        }
+        else if (m_ObjectSpawner != null && m_ObjectSpawner.spawnOptionIndex >= 0 && m_ObjectSpawner.spawnOptionIndex < m_ObjectSpawner.objectPrefabs.Count)
+        {
+            var prefab = m_ObjectSpawner.objectPrefabs[m_ObjectSpawner.spawnOptionIndex];
+            var fItem = prefab.GetComponentInChildren<FurnitureItem>(true);
+            if (fItem != null && !string.IsNullOrEmpty(fItem.DisplayName) && !FurnitureItem.IsGenericDummyName(fItem.DisplayName))
+                m_SelectedFurnitureName = fItem.DisplayName;
+            else
+                m_SelectedFurnitureName = FurnitureItem.CleanName(prefab.name);
+        }
+
+        if (!string.IsNullOrEmpty(m_SelectedFurnitureName))
+        {
+            m_SelectedFurnitureLabel.text = m_SelectedFurnitureName;
+
+            // Dynamically adjust rectangular badge width to fit the exact name with clean padding
+            if (m_SelectedNameBadgeGO.TryGetComponent<RectTransform>(out var badgeRect))
+            {
+                float preferredW = m_SelectedFurnitureLabel.preferredWidth;
+                badgeRect.sizeDelta = new Vector2(Mathf.Clamp(preferredW + 36f, 130f, 360f), 42f);
+            }
+
+            if (!m_SelectedNameBadgeGO.activeSelf)
+                m_SelectedNameBadgeGO.SetActive(true);
+        }
+        else
+        {
+            if (m_SelectedNameBadgeGO.activeSelf)
+                m_SelectedNameBadgeGO.SetActive(false);
         }
     }
 
@@ -382,6 +784,16 @@ public class ARTemplateMenuManager : MonoBehaviour
             {
                 m_ObjectSpawner.spawnOptionIndex = objectIndex;
                 m_ItemSelectedThisSession = true;   // user explicitly picked an item
+
+                // User picked a new item to spawn: deselect any placed furniture
+                ARObjectDimensions.DeselectAll();
+
+                var prefab = m_ObjectSpawner.objectPrefabs[objectIndex];
+                var fItem = prefab.GetComponentInChildren<FurnitureItem>(true);
+                if (fItem != null && !string.IsNullOrEmpty(fItem.DisplayName) && !FurnitureItem.IsGenericDummyName(fItem.DisplayName))
+                    m_SelectedFurnitureName = fItem.DisplayName;
+                else
+                    m_SelectedFurnitureName = FurnitureItem.CleanName(prefab.name);
             }
             else
             {
@@ -390,6 +802,8 @@ public class ARTemplateMenuManager : MonoBehaviour
         }
 
         HideMenu();
+        UpdateSelectedNameBadge();
+        UpdateLockButtonVisual();
     }
 
     /// <summary>
@@ -405,9 +819,21 @@ public class ARTemplateMenuManager : MonoBehaviour
         StartCoroutine(nameof(HideHintAfterDelay));
     }
 
+    /// <summary>
+    /// Shows a brief warning when a furniture placement is blocked due to overlapping an existing object.
+    /// </summary>
+    public void ShowOverlapHint()
+    {
+        if (m_NoSelectionHintLabel == null) return;
+        StopCoroutine(nameof(HideHintAfterDelay));
+        m_NoSelectionHintLabel.text = "Cannot place: Space occupied by another item";
+        m_NoSelectionHintLabel.gameObject.SetActive(true);
+        StartCoroutine(nameof(HideHintAfterDelay));
+    }
+
     IEnumerator HideHintAfterDelay()
     {
-        yield return new WaitForSeconds(2f);
+        yield return new WaitForSeconds(2.2f);
         if (m_NoSelectionHintLabel != null)
             m_NoSelectionHintLabel.gameObject.SetActive(false);
     }
@@ -421,6 +847,7 @@ public class ARTemplateMenuManager : MonoBehaviour
             m_ObjectMenuAnimator.SetBool("Show", true);
         }
         AdjustARDebugMenuPosition();
+        UpdateSelectedNameBadge();
     }
 
     /// <summary>
@@ -462,14 +889,18 @@ public class ARTemplateMenuManager : MonoBehaviour
     /// </summary>
     public void ShowHideDebugMenu()
     {
+        if (m_DebugMenu == null) return;
+
         if (m_DebugMenu.gameObject.activeSelf)
         {
-            m_DebugMenuSlider.value = 0;
+            if (m_DebugMenuSlider != null)
+                m_DebugMenuSlider.value = 0;
             m_DebugMenu.gameObject.SetActive(false);
         }
         else
         {
-            m_DebugMenuSlider.value = 1;
+            if (m_DebugMenuSlider != null)
+                m_DebugMenuSlider.value = 1;
             m_DebugMenu.gameObject.SetActive(true);
             AdjustARDebugMenuPosition();
         }
@@ -484,6 +915,9 @@ public class ARTemplateMenuManager : MonoBehaviour
         {
             Destroy(child.gameObject);
         }
+        ARObjectDimensions.DeselectAll();
+        m_SelectedFurnitureName = null;
+        UpdateSelectedNameBadge();
     }
 
     /// <summary>
@@ -504,6 +938,7 @@ public class ARTemplateMenuManager : MonoBehaviour
 
         m_ItemSelectedThisSession = false;  // reset for next menu session
         AdjustARDebugMenuPosition();
+        UpdateSelectedNameBadge();
     }
 
     void ChangePlaneVisibility(bool setVisible)
@@ -530,22 +965,32 @@ public class ARTemplateMenuManager : MonoBehaviour
                 List<RaycastResult> results = new List<RaycastResult>();
                 EventSystem.current.RaycastAll(eventData, results);
                 if (results.Count > 0)
-                    return; // Tap was on a UI element (e.g. Measure Button, catalog)
+                    return; // Tap was on a UI element
             }
         }
 
         if (m_ShowObjectMenu)
             HideMenu();
-        if (m_ShowOptionsModal)
+        if (m_ShowOptionsModal && m_ModalMenu != null)
             m_ModalMenu.SetActive(false);
     }
 
     void DeleteFocusedObject()
     {
-        var currentFocusedObject = m_InteractionGroup.focusInteractable;
+        var currentFocusedObject = m_InteractionGroup != null ? m_InteractionGroup.focusInteractable : null;
         if (currentFocusedObject != null)
         {
             Destroy(currentFocusedObject.transform.gameObject);
+            ARObjectDimensions.DeselectAll();
+            m_SelectedFurnitureName = null;
+            UpdateSelectedNameBadge();
+        }
+        else if (ARObjectDimensions.currentSelected != null)
+        {
+            Destroy(ARObjectDimensions.currentSelected.gameObject);
+            ARObjectDimensions.DeselectAll();
+            m_SelectedFurnitureName = null;
+            UpdateSelectedNameBadge();
         }
     }
 
@@ -564,6 +1009,8 @@ public class ARTemplateMenuManager : MonoBehaviour
 
     void AdjustARDebugMenuPosition()
     {
+        if (m_DebugMenu == null) return;
+
         float screenWidthInInches = Screen.width / Screen.dpi;
 
         if (screenWidthInInches < 5)

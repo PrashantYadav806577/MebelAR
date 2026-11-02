@@ -76,7 +76,16 @@ namespace MebelAR.Diagnostics
         private void Awake()
         {
             if (m_Camera == null)
-                m_Camera = GetComponent<Camera>() ?? Camera.main;
+            {
+                if (Camera.main != null)
+                {
+                    m_Camera = Camera.main;
+                }
+                else
+                {
+                    m_Camera = FindObjectOfType<Camera>();
+                }
+            }
 
             if (m_Camera != null)
             {
@@ -98,7 +107,8 @@ namespace MebelAR.Diagnostics
             m_MonitorPass = new ARQueueMonitorPass(this);
             m_PipPass = new ARCornerPipPass(this);
 
-            Debug.Log($"[AR_DIAG] ARDiagnosticOverlay initialized. Camera={m_Camera?.name}, Mgr={m_CameraManager != null}, Bg={m_CameraBackground != null}, ClearFix={m_EnableClearFix}");
+            string cameraName = (m_Camera != null) ? m_Camera.name : "None";
+            Debug.Log($"[AR_DIAG] ARDiagnosticOverlay initialized. Camera={cameraName}, Mgr={m_CameraManager != null}, Bg={m_CameraBackground != null}, ClearFix={m_EnableClearFix}");
         }
 
         private static void CacheReflection()
