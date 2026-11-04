@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -284,9 +284,30 @@ public class GoalManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Triggers a restart of the onboarding/coaching process.
+    /// Triggers the onboarding/coaching process. Shows the intro tutorial first
+    /// (if available), then proceeds to the AR experience.
     /// </summary>
     public void StartCoaching()
+    {
+        // Hide the welcome screen immediately
+        m_GreetingPrompt.SetActive(false);
+
+        // Show intro tutorial before entering AR
+        IntroTutorialManager tutorial = FindObjectOfType<IntroTutorialManager>(true);
+        if (tutorial == null)
+        {
+            // Attach the tutorial manager to this GameObject so it persists
+            tutorial = gameObject.AddComponent<IntroTutorialManager>();
+        }
+
+        tutorial.ShowTutorial(this);
+    }
+
+    /// <summary>
+    /// Called by IntroTutorialManager when the user finishes or skips the tutorial.
+    /// Activates the AR experience with the original onboarding goal flow.
+    /// </summary>
+    public void StartARExperience()
     {
         if (m_OnboardingGoals != null)
         {
@@ -317,7 +338,6 @@ public class GoalManager : MonoBehaviour
         m_AllGoalsFinished = false;
         m_CurrentGoalIndex = startingStep;
 
-        m_GreetingPrompt.SetActive(false);
         m_OptionsButton.SetActive(true);
         m_CreateButton.SetActive(true);
         m_MenuManager.enabled = true;
