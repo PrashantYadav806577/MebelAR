@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
 
 /// <summary>
@@ -171,6 +172,45 @@ public class GoalManager : MonoBehaviour
         set => m_MenuManager = value;
     }
 
+    [Tooltip("The AR Session object to control during onboarding.")]
+    [SerializeField]
+    ARSession m_ARSession;
+
+    /// <summary>
+    /// The AR Session object to control during onboarding.
+    /// </summary>
+    public ARSession arSession
+    {
+        get => m_ARSession;
+        set => m_ARSession = value;
+    }
+
+    [Tooltip("The AR Camera Manager component on the Main Camera.")]
+    [SerializeField]
+    ARCameraManager m_CameraManagerComponent;
+
+    /// <summary>
+    /// The AR Camera Manager component on the Main Camera.
+    /// </summary>
+    public ARCameraManager cameraManagerComponent
+    {
+        get => m_CameraManagerComponent;
+        set => m_CameraManagerComponent = value;
+    }
+
+    [Tooltip("The AR Camera Background component on the Main Camera.")]
+    [SerializeField]
+    ARCameraBackground m_CameraBackground;
+
+    /// <summary>
+    /// The AR Camera Background component on the Main Camera.
+    /// </summary>
+    public ARCameraBackground cameraBackground
+    {
+        get => m_CameraBackground;
+        set => m_CameraBackground = value;
+    }
+
     const int k_NumberOfSurfacesTappedToCompleteGoal = 1;
 
     Queue<Goal> m_OnboardingGoals;
@@ -183,6 +223,30 @@ public class GoalManager : MonoBehaviour
     void Awake()
     {
         EnsureWelcomeLayout();
+        SetARActive(false);
+    }
+
+    /// <summary>
+    /// Controls whether the AR camera and tracking session are active.
+    /// Kept OFF on Welcome and Tutorial screens, and only turned ON when entering AR.
+    /// </summary>
+    public void SetARActive(bool active)
+    {
+        if (m_ARSession == null)
+            m_ARSession = FindObjectOfType<ARSession>(true);
+        if (m_CameraManagerComponent == null)
+            m_CameraManagerComponent = FindObjectOfType<ARCameraManager>(true);
+        if (m_CameraBackground == null)
+            m_CameraBackground = FindObjectOfType<ARCameraBackground>(true);
+
+        if (m_ARSession != null)
+            m_ARSession.enabled = active;
+
+        if (m_CameraManagerComponent != null)
+            m_CameraManagerComponent.enabled = active;
+
+        if (m_CameraBackground != null)
+            m_CameraBackground.enabled = active;
     }
 
     void EnsureWelcomeLayout()
@@ -292,6 +356,9 @@ public class GoalManager : MonoBehaviour
         // Hide the welcome screen immediately
         m_GreetingPrompt.SetActive(false);
 
+        // Ensure AR camera/session remains OFF during tutorial
+        SetARActive(false);
+
         // Show intro tutorial before entering AR
         IntroTutorialManager tutorial = FindObjectOfType<IntroTutorialManager>(true);
         if (tutorial == null)
@@ -309,6 +376,15 @@ public class GoalManager : MonoBehaviour
     /// </summary>
     public void StartARExperience()
     {
+        // Turn ON the AR camera, background feed, and tracking session
+        SetARActive(true);
+
+        // Reset voice state and announce AR scanning instruction
+        if (m_MenuManager != null)
+            m_MenuManager.ResetVoiceState();
+
+        AndroidTTSManager.Instance.Speak("Please scan the floor or a flat surface by moving your phone slowly.");
+
         if (m_OnboardingGoals != null)
         {
             m_OnboardingGoals.Clear();

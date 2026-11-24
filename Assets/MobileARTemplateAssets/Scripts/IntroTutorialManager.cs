@@ -13,7 +13,7 @@ public class IntroTutorialManager : MonoBehaviour
     {
         public string title;
         public string description;
-        public string icon; // Unicode emoji used as a simple icon
+        public string icon; // Retained for data compatibility — not rendered
     }
 
     static readonly TutorialStep[] s_Steps = new TutorialStep[]
@@ -46,7 +46,6 @@ public class IntroTutorialManager : MonoBehaviour
 
     // --- Runtime references (built dynamically) ---
     GameObject m_TutorialPanel;
-    TextMeshProUGUI m_IconLabel;
     TextMeshProUGUI m_TitleLabel;
     TextMeshProUGUI m_DescriptionLabel;
     TextMeshProUGUI m_StepIndicatorLabel;
@@ -84,6 +83,9 @@ public class IntroTutorialManager : MonoBehaviour
         if (m_TutorialPanel != null)
             m_TutorialPanel.SetActive(false);
 
+        if (m_GoalManager == null)
+            m_GoalManager = FindObjectOfType<GoalManager>(true);
+
         if (m_GoalManager != null)
             m_GoalManager.StartARExperience();
     }
@@ -115,10 +117,9 @@ public class IntroTutorialManager : MonoBehaviour
         var step = s_Steps[m_CurrentStep];
         bool isLast = m_CurrentStep == s_Steps.Length - 1;
 
-        m_IconLabel.text = step.icon;
         m_TitleLabel.text = step.title;
         m_DescriptionLabel.text = step.description;
-        m_StepIndicatorLabel.text = (m_CurrentStep + 1) + " of " + s_Steps.Length;
+        m_StepIndicatorLabel.text = "Step " + (m_CurrentStep + 1) + " of " + s_Steps.Length;
 
         // Back button: hidden on first step
         m_BackButton.gameObject.SetActive(m_CurrentStep > 0);
@@ -181,64 +182,79 @@ public class IntroTutorialManager : MonoBehaviour
 
         Image scrim = m_TutorialPanel.AddComponent<Image>();
         scrim.sprite = null;
-        scrim.color = new Color(0.06f, 0.09f, 0.16f, 0.92f); // Dark navy scrim
+        scrim.color = new Color(0.06f, 0.09f, 0.16f, 0.94f); // Dark navy scrim
         scrim.raycastTarget = true;
 
-        // --- Content card (centered) ---
+        // --- Content card (responsive, centered) ---
+        // Uses stretch anchors for responsive sizing across devices
         GameObject card = CreateChild(m_TutorialPanel, "TutorialCard");
         RectTransform cardRect = card.GetComponent<RectTransform>();
-        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
-        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMin = new Vector2(0.08f, 0.22f);
+        cardRect.anchorMax = new Vector2(0.92f, 0.78f);
         cardRect.pivot = new Vector2(0.5f, 0.5f);
-        cardRect.anchoredPosition = new Vector2(0f, 10f);
-        cardRect.sizeDelta = new Vector2(560f, 480f);
+        cardRect.offsetMin = Vector2.zero;
+        cardRect.offsetMax = Vector2.zero;
 
         Image cardBg = card.AddComponent<Image>();
         cardBg.sprite = null;
         cardBg.color = new Color(0.09f, 0.14f, 0.23f, 0.98f); // Deep navy #17243A
         cardBg.raycastTarget = false;
 
-        var cardOutline = card.AddComponent<Outline>();
-        cardOutline.effectColor = new Color(0.25f, 0.35f, 0.50f, 0.40f);
-        cardOutline.effectDistance = new Vector2(1.5f, -1.5f);
-
         // --- Step Indicator (top of card) ---
         m_StepIndicatorLabel = CreateTMP(card, "StepIndicator",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(0f, -20f), new Vector2(200f, 30f),
-            14f, FontStyles.Normal, new Color(0.80f, 0.84f, 0.88f, 0.8f),
-            TextAlignmentOptions.Center, "1 of 4");
+            new Vector2(0f, -24f), new Vector2(220f, 28f),
+            14f, FontStyles.Normal, new Color(0.08f, 0.72f, 0.65f, 0.9f),
+            TextAlignmentOptions.Center, "Step 1 of 4");
+        m_StepIndicatorLabel.enableAutoSizing = true;
+        m_StepIndicatorLabel.fontSizeMin = 11f;
+        m_StepIndicatorLabel.fontSizeMax = 16f;
+        m_StepIndicatorLabel.enableWordWrapping = false;
 
-        // --- Icon ---
-        m_IconLabel = CreateTMP(card, "Icon",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(0f, -65f), new Vector2(100f, 70f),
-            48f, FontStyles.Normal, Color.white,
-            TextAlignmentOptions.Center, "");
+        // --- Decorative accent line below step indicator ---
+        GameObject accentLine = CreateChild(card, "AccentLine");
+        RectTransform accentRect = accentLine.GetComponent<RectTransform>();
+        accentRect.anchorMin = new Vector2(0.5f, 1f);
+        accentRect.anchorMax = new Vector2(0.5f, 1f);
+        accentRect.pivot = new Vector2(0.5f, 1f);
+        accentRect.anchoredPosition = new Vector2(0f, -52f);
+        accentRect.sizeDelta = new Vector2(40f, 3f);
+        Image accentImg = accentLine.AddComponent<Image>();
+        accentImg.sprite = null;
+        accentImg.color = new Color(0.08f, 0.72f, 0.65f, 0.6f); // Teal accent
+        accentImg.raycastTarget = false;
 
         // --- Title ---
         m_TitleLabel = CreateTMP(card, "Title",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(0f, -140f), new Vector2(480f, 44f),
-            26f, FontStyles.Bold, Color.white,
+            new Vector2(0.05f, 1f), new Vector2(0.95f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(0f, -72f), new Vector2(0f, 48f),
+            28f, FontStyles.Bold, Color.white,
             TextAlignmentOptions.Center, "");
+        m_TitleLabel.enableAutoSizing = true;
+        m_TitleLabel.fontSizeMin = 20f;
+        m_TitleLabel.fontSizeMax = 32f;
+        m_TitleLabel.enableWordWrapping = true;
 
         // --- Description ---
         m_DescriptionLabel = CreateTMP(card, "Description",
-            new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(0f, -210f), new Vector2(460f, 90f),
+            new Vector2(0.06f, 1f), new Vector2(0.94f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(0f, -132f), new Vector2(0f, 100f),
             16f, FontStyles.Normal, new Color(0.80f, 0.84f, 0.88f, 1f),
             TextAlignmentOptions.Center, "");
+        m_DescriptionLabel.enableAutoSizing = true;
+        m_DescriptionLabel.fontSizeMin = 13f;
+        m_DescriptionLabel.fontSizeMax = 20f;
         m_DescriptionLabel.enableWordWrapping = true;
-        m_DescriptionLabel.lineSpacing = 8f;
+        m_DescriptionLabel.lineSpacing = 6f;
+        m_DescriptionLabel.overflowMode = TextOverflowModes.Ellipsis;
 
         // --- Step Dots ---
         GameObject dotsContainer = CreateChild(card, "Dots");
         RectTransform dotsRect = dotsContainer.GetComponent<RectTransform>();
-        dotsRect.anchorMin = new Vector2(0.5f, 1f);
-        dotsRect.anchorMax = new Vector2(0.5f, 1f);
-        dotsRect.pivot = new Vector2(0.5f, 1f);
-        dotsRect.anchoredPosition = new Vector2(0f, -300f);
+        dotsRect.anchorMin = new Vector2(0.5f, 0f);
+        dotsRect.anchorMax = new Vector2(0.5f, 0f);
+        dotsRect.pivot = new Vector2(0.5f, 0f);
+        dotsRect.anchoredPosition = new Vector2(0f, 72f);
         dotsRect.sizeDelta = new Vector2(120f, 10f);
 
         HorizontalLayoutGroup hlg = dotsContainer.AddComponent<HorizontalLayoutGroup>();
@@ -267,7 +283,7 @@ public class IntroTutorialManager : MonoBehaviour
         // Back button (bottom-left of card)
         m_BackButton = CreateButton(card, "BackButton",
             new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(0f, 0f),
-            new Vector2(30f, 30f), new Vector2(110f, 44f),
+            new Vector2(24f, 24f), new Vector2(120f, 50f),
             "Back", 16f,
             new Color(0.18f, 0.26f, 0.38f, 0.95f), // Slate bg
             Color.white);
@@ -276,7 +292,7 @@ public class IntroTutorialManager : MonoBehaviour
         // Next / Start Designing button (bottom-right of card)
         m_NextButton = CreateButton(card, "NextButton",
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f),
-            new Vector2(-30f, 30f), new Vector2(170f, 44f),
+            new Vector2(-24f, 24f), new Vector2(180f, 50f),
             "Next", 16f,
             new Color(0.08f, 0.72f, 0.65f, 1f), // Teal #14B8A6
             Color.white);
@@ -286,7 +302,7 @@ public class IntroTutorialManager : MonoBehaviour
         // Skip Intro (top-right of full panel, not inside card)
         m_SkipButton = CreateButton(m_TutorialPanel, "SkipIntroButton",
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-24f, -40f), new Vector2(120f, 36f),
+            new Vector2(-24f, -40f), new Vector2(130f, 42f),
             "Skip Intro", 14f,
             new Color(0.18f, 0.26f, 0.38f, 0.70f), // Subtle slate
             new Color(0.80f, 0.84f, 0.88f, 0.9f));
@@ -355,14 +371,23 @@ public class IntroTutorialManager : MonoBehaviour
         Button btn = go.AddComponent<Button>();
         btn.targetGraphic = bg;
 
+        // Color transition for press feedback
+        ColorBlock colors = btn.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(0.9f, 0.9f, 0.9f, 1f);
+        colors.pressedColor = new Color(0.7f, 0.7f, 0.7f, 1f);
+        colors.selectedColor = Color.white;
+        colors.fadeDuration = 0.1f;
+        btn.colors = colors;
+
         // Button label
         GameObject labelGO = new GameObject("Label");
         labelGO.transform.SetParent(go.transform, false);
         RectTransform labelRT = labelGO.AddComponent<RectTransform>();
         labelRT.anchorMin = Vector2.zero;
         labelRT.anchorMax = Vector2.one;
-        labelRT.offsetMin = new Vector2(8f, 0f);
-        labelRT.offsetMax = new Vector2(-8f, 0f);
+        labelRT.offsetMin = new Vector2(12f, 0f);
+        labelRT.offsetMax = new Vector2(-12f, 0f);
 
         TextMeshProUGUI tmp = labelGO.AddComponent<TextMeshProUGUI>();
         if (m_Font != null) tmp.font = m_Font;
@@ -371,9 +396,11 @@ public class IntroTutorialManager : MonoBehaviour
         tmp.fontStyle = FontStyles.Bold;
         tmp.color = textColor;
         tmp.alignment = TextAlignmentOptions.Center;
+        tmp.enableAutoSizing = true;
+        tmp.fontSizeMin = 13f;
+        tmp.fontSizeMax = 18f;
         tmp.raycastTarget = false;
 
         return btn;
     }
 }
-

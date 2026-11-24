@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -247,6 +247,15 @@ public class ARTemplateMenuManager : MonoBehaviour
     Vector2 m_ObjectButtonOffset = Vector2.zero;
     Vector2 m_ObjectMenuOffset = Vector2.zero;
     readonly List<ARFeatheredPlaneMeshVisualizerCompanion> featheredPlaneMeshVisualizerCompanions = new List<ARFeatheredPlaneMeshVisualizerCompanion>();
+    bool m_HasAnnouncedSurface = false;
+
+    /// <summary>
+    /// Resets the surface detection voice guidance flag so it can announce again in a new session.
+    /// </summary>
+    public void ResetVoiceState()
+    {
+        m_HasAnnouncedSurface = false;
+    }
 
     void Awake()
     {
@@ -311,6 +320,9 @@ public class ARTemplateMenuManager : MonoBehaviour
             m_SelectedFurnitureName = dims.DisplayName;
             UpdateSelectedNameBadge();
             UpdateLockButtonVisual();
+
+            // Voice Guidance D: After furniture is successfully placed
+            AndroidTTSManager.Instance.Speak("You can move, rotate, or resize your furniture. Lock it when you are happy with its position.");
         }
     }
 
@@ -804,6 +816,9 @@ public class ARTemplateMenuManager : MonoBehaviour
         HideMenu();
         UpdateSelectedNameBadge();
         UpdateLockButtonVisual();
+
+        // Voice Guidance C: When the user selects a furniture item
+        AndroidTTSManager.Instance.Speak("Now tap on the highlighted surface to place your object.");
     }
 
     /// <summary>
@@ -918,6 +933,7 @@ public class ARTemplateMenuManager : MonoBehaviour
         ARObjectDimensions.DeselectAll();
         m_SelectedFurnitureName = null;
         UpdateSelectedNameBadge();
+        ResetVoiceState();
     }
 
     /// <summary>
@@ -1075,6 +1091,13 @@ public class ARTemplateMenuManager : MonoBehaviour
     {
         if (eventArgs.added.Count > 0)
         {
+            if (!m_HasAnnouncedSurface)
+            {
+                m_HasAnnouncedSurface = true;
+                // Voice Guidance B: When a surface is detected
+                AndroidTTSManager.Instance.Speak("Great! Surface detected. Now select an object from the furniture menu.");
+            }
+
             foreach (var plane in eventArgs.added)
             {
                 if (plane.TryGetComponent<ARFeatheredPlaneMeshVisualizerCompanion>(out var visualizer))
